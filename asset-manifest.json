@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/pickems/static/css/main.4e5fba3f.css",
-    "main.js": "/pickems/static/js/main.5f09e509.js",
+    "main.js": "/pickems/static/js/main.f3ef7ec8.js",
     "index.html": "/pickems/index.html",
     "main.4e5fba3f.css.map": "/pickems/static/css/main.4e5fba3f.css.map",
-    "main.5f09e509.js.map": "/pickems/static/js/main.5f09e509.js.map"
+    "main.f3ef7ec8.js.map": "/pickems/static/js/main.f3ef7ec8.js.map"
   },
   "entrypoints": [
     "static/css/main.4e5fba3f.css",
-    "static/js/main.5f09e509.js"
+    "static/js/main.f3ef7ec8.js"
   ]
 }

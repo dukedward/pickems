@@ -73,6 +73,38 @@ function App() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [week]);
 
+    const parseScoreboardGame = (e, weekNumber) => {
+        const competition = e.competitions?.[0] || {};
+        const competitors = competition.competitors || [];
+
+        const home = competitors.find((c) => c.homeAway === "home") || {};
+        const away = competitors.find((c) => c.homeAway === "away") || {};
+
+        const homeTeam = home.team || {};
+        const awayTeam = away.team || {};
+
+        return {
+            id: e.id,
+            week: weekNumber,
+            date: e.date,
+            statusText:
+                e.status?.type?.shortDetail || e.status?.type?.description || "TBD",
+            completed: Boolean(e.status?.type?.completed),
+            home: {
+                id: homeTeam.id,
+                name: homeTeam.displayName,
+                abbrev: homeTeam.abbreviation,
+                score: home.score ?? "",
+            },
+            away: {
+                id: awayTeam.id,
+                name: awayTeam.displayName,
+                abbrev: awayTeam.abbreviation,
+                score: away.score ?? "",
+            },
+        };
+    };
+
     const fetchGames = async (weekNumber) => {
         setLoading(true);
         setError("");
@@ -85,39 +117,7 @@ function App() {
             const data = await res.json();
             const events = data.events || [];
 
-            const parsedGames = events.map((e) => {
-                const competition = e.competitions?.[0] || {};
-                const competitors = competition.competitors || [];
-
-                const home = competitors.find((c) => c.homeAway === "home") || {};
-                const away = competitors.find((c) => c.homeAway === "away") || {};
-
-                const homeTeam = home.team || {};
-                const awayTeam = away.team || {};
-
-                return {
-                    id: e.id,
-                    week: weekNumber,
-                    date: e.date,
-                    statusText:
-                        e.status?.type?.shortDetail ||
-                        e.status?.type?.description ||
-                        "TBD",
-                    completed: Boolean(e.status?.type?.completed),
-                    home: {
-                        id: homeTeam.id,
-                        name: homeTeam.displayName,
-                        abbrev: homeTeam.abbreviation,
-                        score: home.score ?? "",
-                    },
-                    away: {
-                        id: awayTeam.id,
-                        name: awayTeam.displayName,
-                        abbrev: awayTeam.abbreviation,
-                        score: away.score ?? "",
-                    },
-                };
-            });
+            const parsedGames = events.map((e) => parseScoreboardGame(e, weekNumber));
 
             setGames(parsedGames);
 
@@ -132,6 +132,50 @@ function App() {
         } catch (err) {
             console.error(err);
             setError("Failed to load games. Check console and/or CORS issues.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Helper: fetch games for multiple weeks (used when importing all weeks from Excel)
+    const fetchGamesForWeeksFromAPI = async (weekNumbers) => {
+        if (!weekNumbers || weekNumbers.length === 0) return;
+        try {
+            setLoading(true);
+            setError("");
+            const uniqueWeeks = Array.from(new Set(weekNumbers)).filter(
+                (w) => w >= 1 && w <= 18
+            );
+            const responses = await Promise.all(
+                uniqueWeeks.map((w) =>
+                    fetch(`${BASE_URL}?year=${CURRENT_YEAR}&seasontype=2&week=${w}`)
+                )
+            );
+
+            const allParsed = [];
+
+            for (let i = 0; i < responses.length; i++) {
+                const res = responses[i];
+                const w = uniqueWeeks[i];
+                if (!res.ok) continue;
+                const data = await res.json();
+                const events = data.events || [];
+                const parsed = events.map((e) => parseScoreboardGame(e, w));
+                allParsed.push(...parsed);
+            }
+
+            if (allParsed.length > 0) {
+                setAllGames((prev) => {
+                    const updated = { ...prev };
+                    allParsed.forEach((g) => {
+                        updated[g.id] = g;
+                    });
+                    return updated;
+                });
+            }
+        } catch (err) {
+            console.error("Error fetching games for imported weeks", err);
+            setError("Some weeks could not be loaded from ESPN during import.");
         } finally {
             setLoading(false);
         }
@@ -348,13 +392,13 @@ function App() {
         XLSX.writeFile(workbook, "nfl-picks-all-weeks.xlsx");
     };
 
-    // Import predictions from Excel (all sheets)
+    // Import predictions (and weeks) from Excel – handles both single-week and multi-sheet files
     const handleImportFromExcel = (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: "array" });
 
@@ -365,6 +409,8 @@ function App() {
                 allRows.push(...rows);
             });
 
+            const weekNumbersSet = new Set();
+
             setPredictions((prev) => {
                 const updated = { ...prev };
 
@@ -372,6 +418,12 @@ function App() {
                     const gameId =
                         String(row.GameId ?? row.gameId ?? row["Game ID"] ?? "").trim();
                     if (!gameId) return;
+
+                    const weekRaw = row.Week ?? row.week ?? row["Week"];
+                    const weekNum = Number(weekRaw);
+                    if (!Number.isNaN(weekNum) && weekNum >= 1 && weekNum <= 18) {
+                        weekNumbersSet.add(weekNum);
+                    }
 
                     if (!updated[gameId]) updated[gameId] = {};
                     users.forEach((user) => {
@@ -383,8 +435,15 @@ function App() {
 
                 return updated;
             });
+
+            // Fetch games for all weeks found in the Excel (so season stats & chart work immediately)
+            const weeksToFetch = Array.from(weekNumbersSet);
+            if (weeksToFetch.length > 0) {
+                await fetchGamesForWeeksFromAPI(weeksToFetch);
+            }
         };
         reader.readAsArrayBuffer(file);
+        // Allow selecting the same file again if needed
         event.target.value = "";
     };
 
@@ -447,7 +506,7 @@ function App() {
                         </button>
 
                         <label className="file-input-label">
-                            Import from Excel
+                            Import from Excel (all weeks)
                             <input
                                 type="file"
                                 accept=".xlsx,.xls"

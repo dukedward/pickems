@@ -1,0 +1,423 @@
+import React, { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import "./App.css";
+
+const USERS = ["Teddy", "Murk", "Ed", "TD"];
+
+const CURRENT_YEAR = new Date().getFullYear();
+const BASE_URL =
+    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+
+function App() {
+    const [week, setWeek] = useState(1);
+    const [games, setGames] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [predictions, setPredictions] = useState({}); // { [gameId]: { [user]: teamId } }
+    const [hideUnpickedGames, setHideUnpickedGames] = useState(false);
+
+    // Load saved predictions from localStorage
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem("nflPredictions");
+            if (saved) {
+                setPredictions(JSON.parse(saved));
+            }
+        } catch (e) {
+            console.error("Failed to load predictions from localStorage", e);
+        }
+    }, []);
+
+    // Persist predictions
+    useEffect(() => {
+        try {
+            localStorage.setItem("nflPredictions", JSON.stringify(predictions));
+        } catch (e) {
+            console.error("Failed to save predictions", e);
+        }
+    }, [predictions]);
+
+    useEffect(() => {
+        fetchGames(week);
+    }, [week]);
+
+    const fetchGames = async (weekNumber) => {
+        setLoading(true);
+        setError("");
+        try {
+            const url = `${BASE_URL}?year=${CURRENT_YEAR}&seasontype=2&week=${weekNumber}`;
+            const res = await fetch(url);
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            const data = await res.json();
+            const events = data.events || [];
+
+            const parsedGames = events.map((e) => {
+                const competition = e.competitions?.[0] || {};
+                const competitors = competition.competitors || [];
+
+                const home = competitors.find((c) => c.homeAway === "home") || {};
+                const away = competitors.find((c) => c.homeAway === "away") || {};
+
+                const homeTeam = home.team || {};
+                const awayTeam = away.team || {};
+
+                return {
+                    id: e.id,
+                    date: e.date,
+                    statusText:
+                        e.status?.type?.shortDetail ||
+                        e.status?.type?.description ||
+                        "TBD",
+                    completed: Boolean(e.status?.type?.completed),
+                    home: {
+                        id: homeTeam.id,
+                        name: homeTeam.displayName,
+                        abbrev: homeTeam.abbreviation,
+                        score: home.score ?? "",
+                    },
+                    away: {
+                        id: awayTeam.id,
+                        name: awayTeam.displayName,
+                        abbrev: awayTeam.abbreviation,
+                        score: away.score ?? "",
+                    },
+                };
+            });
+
+            setGames(parsedGames);
+        } catch (err) {
+            console.error(err);
+            setError("Failed to load games. Check console and/or CORS issues.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handlePredictionChange = (gameId, user, teamId) => {
+        setPredictions((prev) => ({
+            ...prev,
+            [gameId]: {
+                ...(prev[gameId] || {}),
+                [user]: teamId || undefined,
+            },
+        }));
+    };
+
+    // Standings (per user, across completed games)
+    const standings = useMemo(() => {
+        const stats = {};
+        USERS.forEach((u) => {
+            stats[u] = { correct: 0, total: 0 };
+        });
+
+        games.forEach((game) => {
+            if (!game.completed) return;
+
+            const homeScore = Number(game.home.score);
+            const awayScore = Number(game.away.score);
+            if (Number.isNaN(homeScore) || Number.isNaN(awayScore)) return;
+
+            let winnerId = null;
+            if (homeScore > awayScore) winnerId = game.home.id;
+            else if (awayScore > homeScore) winnerId = game.away.id;
+            else return; // ignore ties
+
+            const picks = predictions[game.id] || {};
+            USERS.forEach((user) => {
+                const pick = picks[user];
+                if (!pick) return;
+                stats[user].total += 1;
+                if (pick === winnerId) {
+                    stats[user].correct += 1;
+                }
+            });
+        });
+
+        const ranking = USERS.map((user) => {
+            const { correct, total } = stats[user];
+            const pct = total > 0 ? correct / total : 0;
+            return { user, correct, total, pct };
+        }).sort((a, b) => {
+            if (b.correct !== a.correct) return b.correct - a.correct;
+            return b.pct - a.pct;
+        });
+
+        return ranking;
+    }, [games, predictions]);
+
+    // Hide games with no predictions (for cleaner UI)
+    const visibleGames = useMemo(() => {
+        if (!hideUnpickedGames) return games;
+        return games.filter((game) => {
+            const picks = predictions[game.id] || {};
+            return USERS.some((user) => !!picks[user]);
+        });
+    }, [games, predictions, hideUnpickedGames]);
+
+    // Export current week's games + predictions to Excel
+    const handleExportToExcel = () => {
+        // Export only games for the currently viewed week (visibleGames)
+        const rows = visibleGames.map((game) => {
+            const gamePreds = predictions[game.id] || {};
+            const row = {
+                Week: week,
+                GameId: game.id,
+                DateUTC: new Date(game.date).toISOString(),
+                HomeTeamId: game.home.id,
+                HomeTeamAbbrev: game.home.abbrev,
+                HomeTeamName: game.home.name,
+                AwayTeamId: game.away.id,
+                AwayTeamAbbrev: game.away.abbrev,
+                AwayTeamName: game.away.name,
+            };
+            USERS.forEach((user) => {
+                // Store the teamId; we’ll map it back on import
+                row[user] = gamePreds[user] || "";
+            });
+            return row;
+        });
+
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, `Week${week}`);
+        XLSX.writeFile(workbook, `nfl-picks-week-${week}.xlsx`);
+    };
+
+    // Import predictions from Excel
+    const handleImportFromExcel = (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: "array" });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(worksheet);
+
+            setPredictions((prev) => {
+                const updated = { ...prev };
+
+                rows.forEach((row) => {
+                    const gameId =
+                        String(row.GameId ?? row.gameId ?? row["Game ID"] ?? "").trim();
+                    if (!gameId) return;
+
+                    if (!updated[gameId]) updated[gameId] = {};
+                    USERS.forEach((user) => {
+                        const val = row[user];
+                        if (val === undefined || val === null || val === "") return;
+                        // val is teamId we exported earlier
+                        updated[gameId][user] = String(val);
+                    });
+                });
+
+                return updated;
+            });
+        };
+        reader.readAsArrayBuffer(file);
+
+        // Allow selecting the same file again if needed
+        event.target.value = "";
+    };
+
+    return (
+        <div className="app">
+            <header className="app-header">
+                <h1>NFL Weekly Pick&apos;Em</h1>
+                <p>
+                    Data from ESPN Scoreboard API · Season {CURRENT_YEAR}, Regular Season
+                </p>
+            </header>
+
+            <div className="layout">
+                <main className="main">
+                    {/* Top controls row */}
+                    <div className="controls">
+                        <label>
+                            Week:&nbsp;
+                            <select
+                                value={week}
+                                onChange={(e) => setWeek(Number(e.target.value))}
+                            >
+                                {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
+                                    <option key={w} value={w}>
+                                        Week {w}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        {loading && <span className="status-badge">Loading…</span>}
+                        {error && <span className="status-badge error">{error}</span>}
+
+                        <label
+                            style={{ marginLeft: "auto", fontSize: "0.8rem", cursor: "pointer" }}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={hideUnpickedGames}
+                                onChange={(e) => setHideUnpickedGames(e.target.checked)}
+                            />{" "}
+                            Hide games with no predictions
+                        </label>
+                    </div>
+
+                    {/* Excel import/export row */}
+                    <div className="controls" style={{ marginTop: "0.25rem" }}>
+                        <button type="button" onClick={handleExportToExcel}>
+                            Export week to Excel
+                        </button>
+
+                        <label className="file-input-label">
+                            Import from Excel
+                            <input
+                                type="file"
+                                accept=".xlsx,.xls"
+                                onChange={handleImportFromExcel}
+                                style={{ display: "none" }}
+                            />
+                        </label>
+                    </div>
+
+                    {/* Empty-state messages */}
+                    {!loading && !error && games.length === 0 && (
+                        <div className="empty-state">No games found for this week.</div>
+                    )}
+
+                    {!loading &&
+                        !error &&
+                        games.length > 0 &&
+                        visibleGames.length === 0 &&
+                        hideUnpickedGames && (
+                            <div className="empty-state">
+                                All games are hidden because they have no predictions yet.
+                            </div>
+                        )}
+
+                    {/* Games list */}
+                    <div className="games-list">
+                        {visibleGames.map((game) => (
+                            <GameCard
+                                key={game.id}
+                                game={game}
+                                predictions={predictions[game.id] || {}}
+                                onPredictionChange={handlePredictionChange}
+                            />
+                        ))}
+                    </div>
+                </main>
+
+                <aside className="sidebar">
+                    <StandingsPanel standings={standings} />
+                </aside>
+            </div>
+        </div>
+    );
+}
+
+function GameCard({ game, predictions, onPredictionChange }) {
+    const kickoff = new Date(game.date);
+
+    return (
+        <div className="game-card">
+            <div className="game-header">
+                <div className="game-time">
+                    {kickoff.toLocaleString(undefined, {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                    })}
+                </div>
+                <div className="game-status">{game.statusText}</div>
+            </div>
+
+            <div className="teams">
+                <TeamRow team={game.away} label="Away" />
+                <TeamRow team={game.home} label="Home" />
+            </div>
+
+            <div className="predictions">
+                {USERS.map((user) => (
+                    <div key={user} className="prediction-row">
+                        <span className="prediction-user">{user}</span>
+                        <select
+                            value={predictions[user] || ""}
+                            onChange={(e) =>
+                                onPredictionChange(game.id, user, e.target.value)
+                            }
+                        >
+                            <option value="">– Pick winner –</option>
+                            <option value={game.away.id}>
+                                {game.away.abbrev} ({game.away.name})
+                            </option>
+                            <option value={game.home.id}>
+                                {game.home.abbrev} ({game.home.name})
+                            </option>
+                        </select>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function TeamRow({ team, label }) {
+    return (
+        <div className="team-row">
+            <div className="team-info">
+                <span className="team-label">{label}</span>
+                <span className="team-name">
+                    {team.abbrev} · {team.name}
+                </span>
+            </div>
+            <div className="team-score">{team.score}</div>
+        </div>
+    );
+}
+
+function StandingsPanel({ standings }) {
+    return (
+        <div className="standings">
+            <h2>Rankings</h2>
+            {standings.length === 0 ? (
+                <p className="standings-empty">
+                    No completed games with predictions yet.
+                </p>
+            ) : (
+                <table className="standings-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>User</th>
+                            <th>Correct</th>
+                            <th>Total</th>
+                            <th>Win %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {standings.map((s, idx) => (
+                            <tr key={s.user}>
+                                <td>{idx + 1}</td>
+                                <td>{s.user}</td>
+                                <td>{s.correct}</td>
+                                <td>{s.total}</td>
+                                <td>{s.total > 0 ? (s.pct * 100).toFixed(1) + "%" : "—"}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+            <p className="standings-note">
+                Rankings are based on completed games only; ties are ignored.
+            </p>
+        </div>
+    );
+}
+
+export default App;

@@ -1,6 +1,4 @@
 // src/firebase.js
-// npm install firebase
-
 import { initializeApp } from "firebase/app";
 import {
     getFirestore,
@@ -14,12 +12,12 @@ import {
     getAuth,
     onAuthStateChanged,
     signInWithPopup,
-    signInWithRedirect,
-    getRedirectResult,
     GoogleAuthProvider,
     signOut,
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
+    signInWithRedirect,
+    getRedirectResult,
 } from "firebase/auth";
 import {
     getStorage,
@@ -29,14 +27,23 @@ import {
 } from "firebase/storage";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyBUqWQEezGmrRqZQehaqT1mpkn9DYDVexc",
-    authDomain: "bt-pickems.firebaseapp.com",
-    projectId: "bt-pickems",
-    storageBucket: "bt-pickems.firebasestorage.app",
-    messagingSenderId: "1035378371856",
-    appId: "1:1035378371856:web:85df4dbebfe3e31e818995",
-    measurementId: "G-2GDHRQB15W"
+    apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+    authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.REACT_APP_FIREBASE_APP_ID,
 };
+
+// Optional: little safety check in dev
+if (process.env.NODE_ENV === "development") {
+    Object.entries(firebaseConfig).forEach(([key, value]) => {
+        if (!value) {
+            // eslint-disable-next-line no-console
+            console.warn(`Firebase config value missing for ${key}`);
+        }
+    });
+}
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);

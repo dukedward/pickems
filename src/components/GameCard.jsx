@@ -1,13 +1,20 @@
+// src/components/GameCard.jsx
 import React from "react";
 import TeamRow from "./TeamRow";
 
-export default function GameCard({
+function GameCard({
     game,
-    users,
-    predictions,
-    onPredictionChange,
+    players,
+    picks,
+    currentPlayerId,
+    isAdmin,
+    onPickChange,
 }) {
     const kickoff = new Date(game.date);
+
+    const handleChange = (playerId, value) => {
+        onPickChange(game.id, playerId, value);
+    };
 
     return (
         <div className="game-card">
@@ -30,26 +37,47 @@ export default function GameCard({
             </div>
 
             <div className="predictions">
-                {users.map((user) => (
-                    <div key={user.id} className="prediction-row">
-                        <span className="prediction-user">{user.name}</span>
-                        <select
-                            value={predictions[user.id] || ""}
-                            onChange={(e) =>
-                                onPredictionChange(game.id, user.id, e.target.value)
-                            }
-                        >
-                            <option value="">– Pick winner –</option>
-                            <option value={game.away.id}>
-                                {game.away.abbrev} ({game.away.name})
-                            </option>
-                            <option value={game.home.id}>
-                                {game.home.abbrev} ({game.home.name})
-                            </option>
-                        </select>
-                    </div>
-                ))}
+                {players.map((player) => {
+                    const pickTeamId = picks[player.id] || "";
+                    const isSelfRow = currentPlayerId === player.id;
+                    const alreadyPicked = Boolean(pickTeamId);
+                    const canEdit = isAdmin || (isSelfRow && !alreadyPicked);
+                    const displayName = player.displayName || player.name;
+
+                    return (
+                        <div key={player.id} className="prediction-row">
+                            <span className="prediction-user">
+                                {displayName}
+                                {player.role === "admin" && (
+                                    <span className="badge badge-sm">Admin</span>
+                                )}
+                            </span>
+
+                            <select
+                                value={pickTeamId}
+                                onChange={(e) =>
+                                    handleChange(player.id, e.target.value)
+                                }
+                                disabled={!canEdit}
+                            >
+                                <option value="">
+                                    {alreadyPicked && !isAdmin && isSelfRow
+                                        ? "Pick locked"
+                                        : "– Pick winner –"}
+                                </option>
+                                <option value={game.away.id}>
+                                    {game.away.abbrev} ({game.away.name})
+                                </option>
+                                <option value={game.home.id}>
+                                    {game.home.abbrev} ({game.home.name})
+                                </option>
+                            </select>
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );
 }
+
+export default GameCard;

@@ -1,7 +1,6 @@
-// src/components/TeamRow.jsx
 import React from "react";
 
-function TeamRow({ team, label }) {
+export default function TeamRow({ team, label }) {
     return (
         <div className="team-row">
             <div className="team-info">
@@ -14,5 +13,3 @@ function TeamRow({ team, label }) {
         </div>
     );
 }
-
-export default TeamRow;

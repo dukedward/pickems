@@ -413,9 +413,474 @@
     opacity: 0.85;
 }
 
-/* Stack sidebar panels nicely */
+/* Toast */
+.toast-container {
+    position: fixed;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.5);
+}
+
+.toast-success {
+    background: rgba(22, 163, 74, 0.95);
+    color: #ecfdf3;
+}
+
+.toast-error {
+    background: rgba(185, 28, 28, 0.95);
+    color: #fef2f2;
+}
+
+.toast-message {
+    white-space: nowrap;
+}
+
+.toast-close {
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+/* Small badges */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0.25rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    background: rgba(250, 204, 21, 0.15);
+    border: 1px solid rgba(250, 204, 21, 0.7);
+    color: #facc15;
+}
+
+.badge-sm {
+    margin-left: 0.4rem;
+}
+
+/* Sidebar stacking tweaks */
 .sidebar .standings+.standings,
 .sidebar .settings-panel+.standings,
 .sidebar .standings+.winpct-chart {
     margin-top: 0.8rem;
+}
+
+.login-panel-wrapper {
+    max-width: 480px;
+    margin: 0.75rem auto 0.5rem;
+}
+
+.login-panel {
+    background: #020617;
+    border-radius: 12px;
+    padding: 1rem 1.2rem 1.1rem;
+    border: 1px solid rgba(148, 163, 184, 0.5);
+}
+
+.login-panel h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+}
+
+.login-subtitle {
+    margin: 0 0 0.6rem;
+    font-size: 0.8rem;
+    color: #9ca3af;
+}
+
+.login-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0.7rem 0;
+    font-size: 0.75rem;
+    color: #9ca3af;
+}
+
+.login-divider::before,
+.login-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #1f2933;
+    margin: 0 0.5rem;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.login-label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.8rem;
+    gap: 0.15rem;
+}
+
+.login-input {
+    padding: 0.25rem 0.4rem;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.7);
+    background: #020617;
+    color: #e5e7eb;
+    font-size: 0.8rem;
+}
+
+.login-error {
+    font-size: 0.75rem;
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.4);
+    padding: 0.25rem 0.4rem;
+    border-radius: 6px;
+}
+
+.login-mode-toggle {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    text-align: center;
+}
+
+.login-mode-toggle button {
+    border: none;
+    background: transparent;
+    color: #38bdf8;
+    cursor: pointer;
+}
+
+/* Buttons */
+.btn {
+    border-radius: 999px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.35rem 0.8rem;
+}
+
+.btn-primary {
+    background: #22c55e;
+    color: #022c22;
+    font-weight: 600;
+    width: 100%;
+    margin-top: 0.35rem;
+}
+
+.btn-google {
+    width: 100%;
+    background: #111827;
+    color: #e5e7eb;
+    border: 1px solid rgba(148, 163, 184, 0.7);
+}
+
+.user-settings-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 60;
+}
+
+.user-settings {
+    background: #020617;
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.6);
+    width: min(800px, 95vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0.9rem 1.2rem 1.1rem;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+    overflow: hidden;
+}
+
+.user-settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.6rem;
+}
+
+.user-settings-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.user-settings-body {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 1rem;
+    flex: 1;
+    /* take remaining height below header */
+    overflow-y: auto;
+    /* ✅ scroll this area when content is tall */
+    min-height: 0;
+    /* important in flex/grid containers for scroll */
+}
+
+.user-avatar-block {
+    border-right: 1px solid rgba(30, 64, 175, 0.4);
+    padding-right: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.user-settings-displayname {
+    margin: 0.3rem 0 0.6rem;
+    font-weight: 600;
+}
+
+.user-settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.user-settings-right {
+    padding-left: 0.5rem;
+}
+
+.user-settings-hint {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 0.3rem;
+}
+
+.file-input-label.small {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+}
+
+/* Responsive */
+@media (max-width: 720px) {
+    .user-settings-body {
+        grid-template-columns: 1fr;
+    }
+
+    .user-avatar-block {
+        border-right: none;
+        border-bottom: 1px solid rgba(30, 64, 175, 0.4);
+        padding-right: 0;
+        padding-bottom: 0.7rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .user-settings-right {
+        padding-left: 0;
+    }
+}
+
+.settings-note {
+    font-size: 0.7rem;
+    color: #9ca3af;
+    margin-top: 0.3rem;
+}
+
+.mystats-table-wrapper {
+    max-height: 50vh;
+    overflow: auto;
+}
+
+.mystats-win {
+    color: #4ade80;
+    font-weight: 600;
+}
+
+.mystats-loss {
+    color: #f97373;
+    font-weight: 600;
+}
+
+.auth-panel {
+    display: flex;
+    flex-direction: row;
+    gap: 1rem;
+}
+
+.mystats-sparkline {
+    margin-top: 0.75rem;
+    width: 100%;
+    font-size: 0.8rem;
+}
+
+.mystats-sparkline svg {
+    width: 100%;
+    max-width: 100%;
+    display: block;
+}
+
+.mystats-sparkline-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.15rem;
+    font-size: 0.7rem;
+    color: #9ca3af;
+    overflow-x: auto;
+    /* if lots of weeks, you can scroll labels */
+}
+
+.mystats-sparkline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.2rem;
+    color: #e5e7eb;
+}
+
+.mystats-sparkline-bg {
+    fill: #020617;
+    stroke: rgba(30, 64, 175, 0.5);
+}
+
+.mystats-sparkline-midline {
+    stroke: rgba(148, 163, 184, 0.3);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+}
+
+.mystats-sparkline-line {
+    stroke: #22c55e;
+    stroke-width: 2;
+}
+
+.mystats-sparkline-dot {
+    fill: #eab308;
+}
+
+.mystats-recent-top,
+.mystats-recent-bottom {
+    justify-content: space-between;
+}
+
+.mystats-recent-pick,
+.mystats-recent-status,
+.mystats-recent-date {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* optional: slightly smaller for mobile */
+@media (max-width: 480px) {
+    .mystats-recent-bottom {
+        gap: 0.2rem 0.4rem;
+    }
+}
+
+/* Make header & auth area flex and wrap nicely */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.auth-panel {
+    display: flex;
+    flex-direction: row;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+/* Standings table wrapper for horizontal scroll on mobile */
+.standings-table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.standings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 0.4rem;
+    min-width: 340px;
+    /* ✅ prevents columns squishing too hard on small screens */
+}
+
+/* Global responsive tweaks for small screens */
+@media (max-width: 720px) {
+    .app-header {
+        padding: 1rem 1rem;
+    }
+
+    .layout {
+        padding: 1rem;
+        gap: 1rem;
+    }
+
+    .controls {
+        flex-wrap: wrap;
+        align-items: stretch;
+    }
+
+    .controls>* {
+        flex: 1 1 100%;
+    }
+
+    .controls label {
+        width: 100%;
+    }
+
+    .controls button,
+    .file-input-label {
+        width: 100%;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .main {
+        gap: 0.75rem;
+    }
+
+    .games {
+        gap: 0.75rem;
+    }
+}
+
+/* Even tighter for very small devices */
+@media (max-width: 480px) {
+    .app-header h1 {
+        font-size: 1.4rem;
+    }
+
+    .app-header p {
+        font-size: 0.8rem;
+    }
+
+    .auth-panel {
+        justify-content: flex-start;
+    }
+
+    .auth-panel button {
+        padding: 0.25rem 0.6rem;
+        font-size: 0.8rem;
+    }
+
+    .login-panel-wrapper {
+        margin: 0.6rem 0.75rem;
+    }
+
+    .login-panel {
+        padding: 0.85rem 0.9rem 0.95rem;
+    }
 }

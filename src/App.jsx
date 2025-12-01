@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import "./App.css";
@@ -6,75 +7,196 @@ import GameCard from "./components/GameCard";
 import StandingsPanel from "./components/StandingsPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import WinPctChart from "./components/WinPctChart";
-import Avatar from "./components/Avatar";
+import WinnerModal from "./components/WinnerModal";
+import LoginPanel from "./components/LoginPanel";
+import UserSettingsPage from "./components/UserSettingsPage";
+import MyStatsPage from "./components/MyStatsPage";
+import Toast from "./util/Toast";
+
+import {
+    db,
+    auth,
+    collection,
+    doc,
+    onSnapshot,
+    setDoc,
+    getDoc,
+    onAuthStateChanged,
+    signOut,
+} from "./firebase";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const BASE_URL =
     "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
 
-const DEFAULT_USERS = [
-    { id: "teddy", name: "Teddy", initials: "T", color: "#f97316" },
-    { id: "murk", name: "Murk", initials: "M", color: "#22c55e" },
-    { id: "ed", name: "Ed", initials: "E", color: "#3b82f6" },
-    { id: "td", name: "TD", initials: "TD", color: "#eab308" },
-];
+// Set this to your admin login email
+const ADMIN_EMAIL = "edward.c.gregoryiii@gmail.com";
 
 function App() {
     const [week, setWeek] = useState(1);
-    const [games, setGames] = useState([]); // current week games
-    const [allGames, setAllGames] = useState({}); // { [gameId]: game } across all loaded weeks
-    const [loading, setLoading] = useState(false);
+    const [games, setGames] = useState([]);
+    const [allGames, setAllGames] = useState({}); // { [gameId]: game }
+    const [picks, setPicks] = useState({}); // { [gameId]: { [playerId]: teamId } }
+    const [players, setPlayers] = useState([]); // [{ id, name, role, initials, color }]
+    const [authUser, setAuthUser] = useState(null);
+    const [showMyStats, setShowMyStats] = useState(false);
+
+    const [loadingGames, setLoadingGames] = useState(false);
     const [error, setError] = useState("");
-    const [predictions, setPredictions] = useState({}); // { [gameId]: { [userId]: teamId } }
     const [hideUnpickedGames, setHideUnpickedGames] = useState(false);
-    const [users, setUsers] = useState(DEFAULT_USERS);
+
     const [winnerModalOpen, setWinnerModalOpen] = useState(false);
+    const [showUserSettings, setShowUserSettings] = useState(false);
+    const [toast, setToast] = useState(null); // { type: 'success' | 'error', message: string }
 
-    // Load saved users + predictions from localStorage
+    // Auto-dismiss toast after 4s
     useEffect(() => {
-        try {
-            const savedUsers = localStorage.getItem("nflUsers");
-            if (savedUsers) {
-                setUsers(JSON.parse(savedUsers));
-            }
-        } catch (e) {
-            console.error("Failed to load users from localStorage", e);
-        }
+        if (!toast) return;
+        const t = setTimeout(() => setToast(null), 4000);
+        return () => clearTimeout(t);
+    }, [toast]);
 
-        try {
-            const saved = localStorage.getItem("nflPredictions");
-            if (saved) {
-                setPredictions(JSON.parse(saved));
+    // ==== Auth ====
+
+    const currentPlayer = useMemo(
+        () => players.find((p) => p.id === authUser?.uid) || null,
+        [players, authUser]
+    );
+    const isAdmin = currentPlayer?.role === "admin";
+
+    useEffect(() => {
+        const unsub = onAuthStateChanged(auth, async (user) => {
+            setAuthUser(user || null);
+            if (!user) return;
+
+            const role = user.email === ADMIN_EMAIL ? "admin" : "player";
+            const name = user.displayName || user.email || "Player";
+            const initials = name.trim()[0]?.toUpperCase() || "P";
+
+            const playerRef = doc(db, "players", user.uid);
+            const snap = await getDoc(playerRef);
+
+            if (!snap.exists()) {
+                // 🟢 First time we see this user: create with default color
+                await setDoc(playerRef, {
+                    name,
+                    role,
+                    initials,
+                    color: "#22c55e",
+                });
+            } else {
+                // 🟢 Player already exists: update only name/role/initials
+                await setDoc(
+                    playerRef,
+                    {
+                        name,
+                        role,
+                        initials,
+                    },
+                    { merge: true }
+                );
             }
-        } catch (e) {
-            console.error("Failed to load predictions from localStorage", e);
-        }
+        });
+
+        return unsub;
     }, []);
 
-    // Persist users + predictions
-    useEffect(() => {
+    const handleLogout = async () => {
         try {
-            localStorage.setItem("nflUsers", JSON.stringify(users));
+            await signOut(auth);
         } catch (e) {
-            console.error("Failed to save users", e);
+            console.error("Logout failed", e);
+            setToast({
+                type: "error",
+                message: "Logout failed. Check console for details.",
+            });
         }
-    }, [users]);
+    };
+
+    // ==== Firestore subscriptions "#38bdf8" ====
 
     useEffect(() => {
-        try {
-            localStorage.setItem("nflPredictions", JSON.stringify(predictions));
-        } catch (e) {
-            console.error("Failed to save predictions", e);
-        }
-    }, [predictions]);
+        const unsub = onSnapshot(collection(db, "players"), (snapshot) => {
+            const list = [];
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                const rawName = data.name || "Player";
+                const nickname = data.nickname || "";
+                const displayName = nickname || rawName;
+                const initials =
+                    data.initials || rawName.trim()[0]?.toUpperCase() || "P";
+
+                list.push({
+                    id: docSnap.id,
+                    name: rawName,
+                    nickname,
+                    displayName,
+                    role: data.role || "player",
+                    initials,
+                    color: data.color || "#38bdf8",
+                    profileImageUrl: data.profileImageUrl || null,
+                });
+            });
+            setPlayers(list);
+        });
+        return unsub;
+    }, []);
+
+    useEffect(() => {
+        const unsub = onSnapshot(collection(db, "picks"), (snapshot) => {
+            const next = {};
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                next[docSnap.id] = data.predictions || {};
+            });
+            setPicks(next);
+        });
+        return unsub;
+    }, []);
+
+    // ==== ESPN API ====
+    useEffect(() => {
+        // On initial load, try to detect the current NFL week
+        const detectCurrentWeek = async () => {
+            try {
+                const url = `${BASE_URL}?year=${CURRENT_YEAR}&seasontype=2`;
+                const res = await fetch(url);
+                if (!res.ok) return;
+
+                const data = await res.json();
+
+                // ESPN usually has something like data.week.number
+                const maybeWeek =
+                    data.week?.number ??
+                    data.week?.current ??
+                    data.week ??
+                    null;
+
+                const weekNum = Number(maybeWeek);
+                if (
+                    Number.isFinite(weekNum) &&
+                    weekNum >= 1 &&
+                    weekNum <= 18
+                ) {
+                    setWeek(weekNum);
+                }
+            } catch (err) {
+                console.error("Failed to detect current NFL week", err);
+                // Fallback: keep week at default (1)
+            }
+        };
+
+        detectCurrentWeek();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         fetchGames(week);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [week]);
 
-    const parseScoreboardGame = (e, weekNumber) => {
-        const competition = e.competitions?.[0] || {};
+    const parseScoreboardGame = (event, weekNumber) => {
+        const competition = event.competitions?.[0] || {};
         const competitors = competition.competitors || [];
 
         const home = competitors.find((c) => c.homeAway === "home") || {};
@@ -84,12 +206,14 @@ function App() {
         const awayTeam = away.team || {};
 
         return {
-            id: e.id,
+            id: event.id,
             week: weekNumber,
-            date: e.date,
+            date: event.date,
             statusText:
-                e.status?.type?.shortDetail || e.status?.type?.description || "TBD",
-            completed: Boolean(e.status?.type?.completed),
+                event.status?.type?.shortDetail ||
+                event.status?.type?.description ||
+                "TBD",
+            completed: Boolean(event.status?.type?.completed),
             home: {
                 id: homeTeam.id,
                 name: homeTeam.displayName,
@@ -106,7 +230,7 @@ function App() {
     };
 
     const fetchGames = async (weekNumber) => {
-        setLoading(true);
+        setLoadingGames(true);
         setError("");
         try {
             const url = `${BASE_URL}?year=${CURRENT_YEAR}&seasontype=2&week=${weekNumber}`;
@@ -117,31 +241,29 @@ function App() {
             const data = await res.json();
             const events = data.events || [];
 
-            const parsedGames = events.map((e) => parseScoreboardGame(e, weekNumber));
+            const parsed = events.map((e) => parseScoreboardGame(e, weekNumber));
+            setGames(parsed);
 
-            setGames(parsedGames);
-
-            // Merge into "allGames" for season stats
             setAllGames((prev) => {
                 const updated = { ...prev };
-                parsedGames.forEach((g) => {
+                parsed.forEach((g) => {
                     updated[g.id] = g;
                 });
                 return updated;
             });
-        } catch (err) {
-            console.error(err);
-            setError("Failed to load games. Check console and/or CORS issues.");
+        } catch (e) {
+            console.error(e);
+            setError("Failed to load games from ESPN.");
         } finally {
-            setLoading(false);
+            setLoadingGames(false);
         }
     };
 
-    // Helper: fetch games for multiple weeks (used when importing all weeks from Excel)
+    // Helper: fetch multiple weeks (for Excel import all weeks)
     const fetchGamesForWeeksFromAPI = async (weekNumbers) => {
         if (!weekNumbers || weekNumbers.length === 0) return;
         try {
-            setLoading(true);
+            setLoadingGames(true);
             setError("");
             const uniqueWeeks = Array.from(new Set(weekNumbers)).filter(
                 (w) => w >= 1 && w <= 18
@@ -176,73 +298,222 @@ function App() {
         } catch (err) {
             console.error("Error fetching games for imported weeks", err);
             setError("Some weeks could not be loaded from ESPN during import.");
+            setToast({
+                type: "error",
+                message:
+                    "Imported picks, but some weeks could not be loaded from ESPN.",
+            });
         } finally {
-            setLoading(false);
+            setLoadingGames(false);
         }
     };
 
-    const handlePredictionChange = (gameId, userId, teamId) => {
-        setPredictions((prev) => ({
-            ...prev,
-            [gameId]: {
-                ...(prev[gameId] || {}),
-                [userId]: teamId || undefined,
-            },
-        }));
+    // Preload all regular-season weeks into allGames
+    useEffect(() => {
+        const allSeasonWeeks = Array.from({ length: 18 }, (_, i) => i + 1);
+        fetchGamesForWeeksFromAPI(allSeasonWeeks);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // ==== Player updates (settings) ====
+
+    const handleUpdatePlayer = async (playerId, changes) => {
+        if (!authUser) return;
+        const isSelf = authUser.uid === playerId;
+        if (!isAdmin && !isSelf) return;
+
+        const clean = { ...changes };
+        if (typeof clean.name === "string") {
+            const name = clean.name.trim();
+            clean.name = name;
+            if (name) {
+                clean.initials = name[0].toUpperCase();
+            }
+        }
+
+        try {
+            await setDoc(doc(db, "players", playerId), clean, { merge: true });
+        } catch (e) {
+            console.error("Failed to update player", e);
+            setToast({
+                type: "error",
+                message: "Failed to update player. Check console for details.",
+            });
+        }
     };
 
-    const handleUpdateUser = (userId, changes) => {
-        setUsers((prev) =>
-            prev.map((u) => {
-                if (u.id !== userId) return u;
-                const updated = { ...u, ...changes };
-                if (changes.name !== undefined && changes.name.trim() !== "") {
-                    updated.initials = changes.name.trim()[0].toUpperCase();
-                }
-                return updated;
-            })
-        );
+    // ==== Picks permissions + saving ====
+
+    /**
+     * Admin:
+     *   - can change any player's pick any time
+     * Player:
+     *   - can only set their own pick
+     *   - cannot change their pick once set (only admin can override)
+     * Anonymous:
+     *   - view only
+     */
+    const handlePickChange = async (gameId, playerId, teamId) => {
+        if (!authUser || !currentPlayer) return;
+
+        const existingForGame = picks[gameId] || {};
+        const existingPickForRow = existingForGame[playerId];
+        const isSelfRow = currentPlayer.id === playerId;
+
+        if (!isAdmin) {
+            if (!isSelfRow) return;
+            if (existingPickForRow && existingPickForRow !== "") {
+                setToast({
+                    type: "error",
+                    message: "You already picked this game. Only the admin can change it.",
+                });
+                return;
+            }
+        }
+
+        try {
+            const newPredictions = {
+                ...existingForGame,
+                [playerId]: teamId || "",
+            };
+
+            await setDoc(
+                doc(db, "picks", gameId),
+                {
+                    gameId,
+                    week: allGames[gameId]?.week ?? week,
+                    predictions: newPredictions,
+                    updatedAt: Date.now(),
+                },
+                { merge: true }
+            );
+            // Firestore onSnapshot updates local state
+        } catch (e) {
+            console.error("Failed to save pick", e);
+            setToast({
+                type: "error",
+                message: "Failed to save pick. Check console for details.",
+            });
+        }
     };
 
-    // Shared standings computation: given an array of games, compute per-user stats
-    const computeStandings = (gamesArray, predictionsMap, usersList) => {
-        const stats = {};
-        usersList.forEach((u) => {
-            stats[u.id] = { correct: 0, total: 0 };
-        });
+    // ==== Standings (weekly + season) ====
+    // Compute season stats + list of picks for a single user
+    const getUserSeasonStats = (playerId) => {
+        if (!playerId) {
+            return {
+                stats: { correct: 0, incorrect: 0, total: 0, pct: 0 },
+                picks: [],
+            };
+        }
+
+        const gamesArray = Object.values(allGames || {});
+        const picksList = [];
+        let correct = 0;
+        let incorrect = 0;
+        let total = 0;
 
         gamesArray.forEach((game) => {
+            const gamePicks = picks[game.id] || {};
+            const pickTeamId = gamePicks[playerId];
+            if (!pickTeamId) return; // skip games with no pick for this user
+
+            const homeScore = Number(game.home.score);
+            const awayScore = Number(game.away.score);
+
+            const hasScores =
+                !Number.isNaN(homeScore) &&
+                !Number.isNaN(awayScore) &&
+                homeScore !== awayScore;
+
+            let result = "pending";
+            let winnerTeamId = null;
+
+            if (game.completed && hasScores) {
+                winnerTeamId = homeScore > awayScore ? game.home.id : game.away.id;
+                if (pickTeamId === winnerTeamId) {
+                    result = "win";
+                    correct += 1;
+                    total += 1;
+                } else {
+                    result = "loss";
+                    incorrect += 1;
+                    total += 1;
+                }
+            }
+
+            picksList.push({
+                game,
+                pickTeamId,
+                result, // 'win' | 'loss' | 'pending'
+            });
+        });
+
+        const pct = total > 0 ? correct / total : 0;
+
+        // Sort picks by week, then date
+        picksList.sort((a, b) => {
+            const wDiff = (a.game.week || 0) - (b.game.week || 0);
+            if (wDiff !== 0) return wDiff;
+            return new Date(a.game.date) - new Date(b.game.date);
+        });
+
+        return {
+            stats: { correct, incorrect, total, pct },
+            picks: picksList,
+        };
+    };
+
+    const myStats = useMemo(
+        () => getUserSeasonStats(currentPlayer?.id),
+        [currentPlayer, allGames, picks]
+    );
+
+    const computeStandings = (gamesList) => {
+        const stats = {};
+        players.forEach((p) => {
+            stats[p.id] = { correct: 0, total: 0 };
+        });
+
+        gamesList.forEach((game) => {
             if (!game.completed) return;
 
             const homeScore = Number(game.home.score);
             const awayScore = Number(game.away.score);
             if (Number.isNaN(homeScore) || Number.isNaN(awayScore)) return;
 
-            let winnerId = null;
-            if (homeScore > awayScore) winnerId = game.home.id;
-            else if (awayScore > homeScore) winnerId = game.away.id;
+            let winnerTeamId = null;
+            if (homeScore > awayScore) winnerTeamId = game.home.id;
+            else if (awayScore > homeScore) winnerTeamId = game.away.id;
             else return; // ignore ties
 
-            const picks = predictionsMap[game.id] || {};
-            usersList.forEach((user) => {
-                const pick = picks[user.id];
-                if (!pick) return;
-                stats[user.id].total += 1;
-                if (pick === winnerId) {
-                    stats[user.id].correct += 1;
+            const gamePicks = picks[game.id] || {};
+            players.forEach((player) => {
+                const pickTeamId = gamePicks[player.id];
+                if (!pickTeamId) return;
+                stats[player.id].total += 1;
+                if (pickTeamId === winnerTeamId) {
+                    stats[player.id].correct += 1;
                 }
             });
         });
 
-        return usersList
-            .map((user) => {
-                const { correct, total } = stats[user.id];
+        return players
+            .map((player) => {
+                const { correct, total } = stats[player.id] || {
+                    correct: 0,
+                    total: 0,
+                };
                 const pct = total > 0 ? correct / total : 0;
                 return {
-                    userId: user.id,
-                    name: user.name,
-                    initials: user.initials,
-                    color: user.color,
+                    id: player.id,
+                    name: player.name,
+                    nickname: player.nickname,
+                    displayName: player.displayName,
+                    role: player.role,
+                    initials: player.initials,
+                    color: player.color,
+                    profileImageUrl: player.profileImageUrl,
                     correct,
                     total,
                     pct,
@@ -254,31 +525,37 @@ function App() {
             });
     };
 
-    // Weekly standings (current week)
     const weeklyStandings = useMemo(
-        () => computeStandings(games, predictions, users),
-        [games, predictions, users]
+        () => computeStandings(games),
+        [games, picks, players]
     );
 
-    // Season-to-date standings (all loaded games)
     const seasonStandings = useMemo(
-        () => computeStandings(Object.values(allGames), predictions, users),
-        [allGames, predictions, users]
+        () => computeStandings(Object.values(allGames)),
+        [allGames, picks, players]
     );
 
-    // Hide games with no predictions
+    // Hide games with no picks at all
     const visibleGames = useMemo(() => {
         if (!hideUnpickedGames) return games;
         return games.filter((game) => {
-            const picks = predictions[game.id] || {};
-            return users.some((user) => !!picks[user.id]);
+            const gamePicks = picks[game.id] || {};
+            return players.some((p) => !!gamePicks[p.id]);
         });
-    }, [games, predictions, hideUnpickedGames, users]);
+    }, [games, picks, hideUnpickedGames, players]);
 
-    // Export current week to Excel
-    const handleExportToExcel = () => {
+    const topWeekly = weeklyStandings[0];
+
+    const headerDisplayName =
+        currentPlayer?.displayName ||
+        authUser?.email ||
+        "Guest";
+
+    // ==== Excel export/import (admin-import only) ====
+
+    const handleExportWeekToExcel = () => {
         const rows = visibleGames.map((game) => {
-            const gamePreds = predictions[game.id] || {};
+            const gamePicks = picks[game.id] || {};
             const row = {
                 Week: game.week ?? week,
                 GameId: game.id,
@@ -290,14 +567,17 @@ function App() {
                 AwayTeamAbbrev: game.away.abbrev,
                 AwayTeamName: game.away.name,
             };
-            users.forEach((user) => {
-                row[user.name] = gamePreds[user.id] || "";
+            players.forEach((player) => {
+                row[player.name] = gamePicks[player.id] || "";
             });
             return row;
         });
 
         if (rows.length === 0) {
-            alert("No games to export for this week.");
+            setToast({
+                type: "error",
+                message: "No games to export for this week.",
+            });
             return;
         }
 
@@ -305,13 +585,20 @@ function App() {
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, `Week${week}`);
         XLSX.writeFile(workbook, `nfl-picks-week-${week}.xlsx`);
+
+        setToast({
+            type: "success",
+            message: `Exported week ${week} to Excel.`,
+        });
     };
 
-    // Export ALL weeks (multi-sheet + summary + win% data)
     const handleExportAllWeeksToExcel = () => {
         const allGamesArray = Object.values(allGames);
         if (allGamesArray.length === 0) {
-            alert("No games loaded yet. Visit at least one week first.");
+            setToast({
+                type: "error",
+                message: "No games loaded yet. Visit at least one week first.",
+            });
             return;
         }
 
@@ -330,7 +617,7 @@ function App() {
             .sort((a, b) => a - b)
             .forEach((weekNum) => {
                 const rows = gamesByWeek[weekNum].map((game) => {
-                    const gamePreds = predictions[game.id] || {};
+                    const gamePicks = picks[game.id] || {};
                     const row = {
                         Week: game.week ?? weekNum,
                         GameId: game.id,
@@ -342,8 +629,8 @@ function App() {
                         AwayTeamAbbrev: game.away.abbrev,
                         AwayTeamName: game.away.name,
                     };
-                    users.forEach((user) => {
-                        row[user.name] = gamePreds[user.id] || "";
+                    players.forEach((player) => {
+                        row[player.name] = gamePicks[player.id] || "";
                     });
                     return row;
                 });
@@ -359,30 +646,30 @@ function App() {
         // 2) Season summary standings sheet
         const summaryRows = seasonStandings.map((s, idx) => ({
             Rank: idx + 1,
-            User: s.name,
+            Player: s.name,
             Correct: s.correct,
             Total: s.total,
-            WinPct: s.total > 0 ? s.pct : 0, // fraction (0–1)
+            WinPct: s.total > 0 ? s.pct : 0,
         }));
         const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
         const range = XLSX.utils.decode_range(summarySheet["!ref"]);
         for (let R = range.s.r + 1; R <= range.e.r; ++R) {
-            const cellRef = XLSX.utils.encode_cell({ r: R, c: 4 }); // column E
+            const cellRef = XLSX.utils.encode_cell({ r: R, c: 4 }); // WinPct col
             if (summarySheet[cellRef]) {
                 summarySheet[cellRef].z = "0.00%";
             }
         }
         XLSX.utils.book_append_sheet(workbook, summarySheet, "Season_Summary");
 
-        // 3) Win % by user data sheet
+        // 3) Win% data sheet
         const winPctRows = seasonStandings.map((s) => ({
-            User: s.name,
+            Player: s.name,
             WinPct: s.total > 0 ? s.pct : 0,
         }));
         const winPctSheet = XLSX.utils.json_to_sheet(winPctRows);
         const winRange = XLSX.utils.decode_range(winPctSheet["!ref"]);
         for (let R = winRange.s.r + 1; R <= winRange.e.r; ++R) {
-            const cellRef = XLSX.utils.encode_cell({ r: R, c: 1 }); // column B
+            const cellRef = XLSX.utils.encode_cell({ r: R, c: 1 }); // col B
             if (winPctSheet[cellRef]) {
                 winPctSheet[cellRef].z = "0.00%";
             }
@@ -390,77 +677,148 @@ function App() {
         XLSX.utils.book_append_sheet(workbook, winPctSheet, "WinPct_Data");
 
         XLSX.writeFile(workbook, "nfl-picks-all-weeks.xlsx");
+
+        setToast({
+            type: "success",
+            message: "Exported all loaded weeks to Excel.",
+        });
     };
 
-    // Import predictions (and weeks) from Excel – handles both single-week and multi-sheet files
     const handleImportFromExcel = (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
 
+        if (!isAdmin) {
+            setToast({
+                type: "error",
+                message: "Only the admin can import picks from Excel.",
+            });
+            event.target.value = "";
+            return;
+        }
+
         const reader = new FileReader();
         reader.onload = async (e) => {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: "array" });
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: "array" });
 
-            const allRows = [];
-            workbook.SheetNames.forEach((sheetName) => {
-                const worksheet = workbook.Sheets[sheetName];
-                const rows = XLSX.utils.sheet_to_json(worksheet);
-                allRows.push(...rows);
-            });
+                const allRows = [];
+                workbook.SheetNames.forEach((sheetName) => {
+                    const worksheet = workbook.Sheets[sheetName];
+                    const rows = XLSX.utils.sheet_to_json(worksheet);
+                    allRows.push(...rows);
+                });
 
-            const weekNumbersSet = new Set();
-
-            setPredictions((prev) => {
-                const updated = { ...prev };
+                const weekNumbersSet = new Set();
+                const importedGameIds = new Set();
+                const weekByGameId = {};
+                const predictionsByGameId = {};
 
                 allRows.forEach((row) => {
                     const gameId =
                         String(row.GameId ?? row.gameId ?? row["Game ID"] ?? "").trim();
                     if (!gameId) return;
+                    importedGameIds.add(gameId);
 
                     const weekRaw = row.Week ?? row.week ?? row["Week"];
                     const weekNum = Number(weekRaw);
                     if (!Number.isNaN(weekNum) && weekNum >= 1 && weekNum <= 18) {
                         weekNumbersSet.add(weekNum);
+                        weekByGameId[gameId] = weekNum;
                     }
 
-                    if (!updated[gameId]) updated[gameId] = {};
-                    users.forEach((user) => {
-                        const val = row[user.name];
+                    if (!predictionsByGameId[gameId]) {
+                        predictionsByGameId[gameId] = {};
+                    }
+
+                    players.forEach((player) => {
+                        const val = row[player.name];
                         if (val === undefined || val === null || val === "") return;
-                        updated[gameId][user.id] = String(val);
+                        predictionsByGameId[gameId][player.id] = String(val);
                     });
                 });
 
-                return updated;
-            });
+                // Write all picks to Firestore
+                const gameIds = Object.keys(predictionsByGameId);
+                await Promise.all(
+                    gameIds.map((gameId) =>
+                        setDoc(
+                            doc(db, "picks", gameId),
+                            {
+                                gameId,
+                                week: weekByGameId[gameId] ?? null,
+                                predictions: predictionsByGameId[gameId],
+                                updatedAt: Date.now(),
+                            },
+                            { merge: true }
+                        )
+                    )
+                );
 
-            // Fetch games for all weeks found in the Excel (so season stats & chart work immediately)
-            const weeksToFetch = Array.from(weekNumbersSet);
-            if (weeksToFetch.length > 0) {
-                await fetchGamesForWeeksFromAPI(weeksToFetch);
+                const weeksToFetch = Array.from(weekNumbersSet);
+                if (weeksToFetch.length > 0) {
+                    await fetchGamesForWeeksFromAPI(weeksToFetch);
+                }
+
+                if (importedGameIds.size > 0) {
+                    const weeksLabel =
+                        weeksToFetch.length === 0
+                            ? "0 weeks"
+                            : `${weeksToFetch.length} week${weeksToFetch.length === 1 ? "" : "s"
+                            }`;
+                    setToast({
+                        type: "success",
+                        message: `Imported ${importedGameIds.size} game${importedGameIds.size === 1 ? "" : "s"
+                            } across ${weeksLabel}.`,
+                    });
+                } else {
+                    setToast({
+                        type: "error",
+                        message: "No games were found in the imported Excel file.",
+                    });
+                }
+            } catch (err) {
+                console.error("Error importing from Excel", err);
+                setToast({
+                    type: "error",
+                    message: "Failed to import from Excel. Check the file format.",
+                });
             }
         };
+
         reader.readAsArrayBuffer(file);
-        // Allow selecting the same file again if needed
         event.target.value = "";
     };
 
-    const topWeekly = weeklyStandings[0];
+    // ==== Render ====
 
     return (
         <div className="app">
             <header className="app-header">
-                <h1>NFL Weekly Pick&apos;Em</h1>
-                <p>
-                    Data from ESPN Scoreboard API · Season {CURRENT_YEAR}, Regular Season
-                </p>
+                <div>
+                    <h1>NFL Pick&apos;Em</h1>
+                    <p>Season {CURRENT_YEAR} · Regular Season</p>
+                </div>
             </header>
+
+            {/* Login panel when not signed in */}
+            {!authUser && (
+                <div className="login-panel-wrapper">
+                    <LoginPanel
+                        onError={(msg) =>
+                            setToast({ type: "error", message: msg || "Auth error." })
+                        }
+                        onSuccess={(msg) =>
+                            setToast({ type: "success", message: msg || "Signed in." })
+                        }
+                    />
+                </div>
+            )}
 
             <div className="layout">
                 <main className="main">
-                    {/* Top controls row */}
+                    {/* Controls row */}
                     <div className="controls">
                         <label>
                             Week:&nbsp;
@@ -476,8 +834,40 @@ function App() {
                             </select>
                         </label>
 
-                        {loading && <span className="status-badge">Loading…</span>}
-                        {error && <span className="status-badge error">{error}</span>}
+                        <div className="auth-panel">
+                            {authUser ? (
+                                <>
+                                    <span className="auth-user">
+                                        Signed in as <strong>{headerDisplayName}</strong>{" "}
+                                        {isAdmin && <span className="badge">ADMIN</span>}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowUserSettings(true)}
+                                    >
+                                        Settings
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowMyStats(true)}
+                                    >
+                                        My Stats
+                                    </button>
+                                    <button type="button" onClick={handleLogout}>
+                                        Logout
+                                    </button>
+                                </>
+                            ) : (
+                                <span className="auth-user">Viewing as guest</span>
+                            )}
+                        </div>
+
+                        {loadingGames && (
+                            <span className="status-badge">Loading games…</span>
+                        )}
+                        {error && (
+                            <span className="status-badge error">{error}</span>
+                        )}
 
                         <label
                             style={{
@@ -491,13 +881,13 @@ function App() {
                                 checked={hideUnpickedGames}
                                 onChange={(e) => setHideUnpickedGames(e.target.checked)}
                             />{" "}
-                            Hide games with no predictions
+                            Hide games with no picks
                         </label>
                     </div>
 
-                    {/* Excel + Winner controls row */}
+                    {/* Excel row */}
                     <div className="controls" style={{ marginTop: "0.25rem" }}>
-                        <button type="button" onClick={handleExportToExcel}>
+                        <button type="button" onClick={handleExportWeekToExcel}>
                             Export week to Excel
                         </button>
 
@@ -506,7 +896,7 @@ function App() {
                         </button>
 
                         <label className="file-input-label">
-                            Import from Excel (all weeks)
+                            Import from Excel (admin)
                             <input
                                 type="file"
                                 accept=".xlsx,.xls"
@@ -524,44 +914,51 @@ function App() {
                         </button>
                     </div>
 
-                    {/* Empty-state messages */}
-                    {!loading && !error && games.length === 0 && (
+                    {/* Empty messages */}
+                    {!loadingGames && !error && games.length === 0 && (
                         <div className="empty-state">No games found for this week.</div>
                     )}
 
-                    {!loading &&
+                    {!loadingGames &&
                         !error &&
                         games.length > 0 &&
                         visibleGames.length === 0 &&
                         hideUnpickedGames && (
                             <div className="empty-state">
-                                All games are hidden because they have no predictions yet.
+                                All games are hidden because they have no picks yet.
                             </div>
                         )}
 
-                    {/* Games list */}
+                    {/* Game list */}
                     <div className="games-list">
                         {visibleGames.map((game) => (
                             <GameCard
                                 key={game.id}
                                 game={game}
-                                users={users}
-                                predictions={predictions[game.id] || {}}
-                                onPredictionChange={handlePredictionChange}
+                                players={players}
+                                picks={picks[game.id] || {}}
+                                currentPlayerId={currentPlayer?.id || null}
+                                isAdmin={isAdmin}
+                                onPickChange={handlePickChange}
                             />
                         ))}
                     </div>
                 </main>
 
                 <aside className="sidebar">
-                    <SettingsPanel users={users} onUpdateUser={handleUpdateUser} />
+                    <SettingsPanel
+                        players={players}
+                        currentPlayerId={currentPlayer?.id || null}
+                        isAdmin={isAdmin}
+                        onUpdatePlayer={handleUpdatePlayer}
+                    />
 
                     <StandingsPanel title="This Week" standings={weeklyStandings} />
 
                     <StandingsPanel
                         title="Season-to-Date"
                         standings={seasonStandings}
-                        note="Based on all games loaded across weeks; ties are ignored."
+                        note="Based on all games loaded so far; ties ignored."
                     />
 
                     <WinPctChart title="Season Win%" standings={seasonStandings} />
@@ -573,41 +970,36 @@ function App() {
                 onClose={() => setWinnerModalOpen(false)}
                 standing={topWeekly}
             />
-        </div>
-    );
-}
 
-function WinnerModal({ open, onClose, standing }) {
-    if (!open || !standing || standing.total === 0) return null;
-    const winPct = (standing.pct * 100).toFixed(1);
+            <MyStatsPage
+                open={showMyStats}
+                onClose={() => setShowMyStats(false)}
+                player={currentPlayer}
+                stats={myStats?.stats || { correct: 0, incorrect: 0, total: 0, pct: 0 }}
+                picks={myStats?.picks || []}
+            />
 
-    return (
-        <div className="modal-backdrop" onClick={onClose}>
-            <div
-                className="modal"
-                onClick={(e) => {
-                    e.stopPropagation();
-                }}
-            >
-                <div className="modal-header">
-                    <span className="modal-title">Weekly Winner</span>
-                    <button className="modal-close" onClick={onClose}>
-                        ✕
-                    </button>
-                </div>
-                <div className="modal-body">
-                    <div className="winner-trophy">🏆</div>
-                    <Avatar
-                        initials={standing.initials}
-                        color={standing.color}
-                        size={56}
-                    />
-                    <h3 className="winner-name">{standing.name}</h3>
-                    <p className="winner-stats">
-                        {standing.correct} / {standing.total} correct ({winPct}%)
-                    </p>
-                </div>
-            </div>
+            <UserSettingsPage
+                open={showUserSettings}
+                onClose={() => setShowUserSettings(false)}
+                player={currentPlayer}
+                onSave={(changes) =>
+                    currentPlayer &&
+                    setDoc(
+                        doc(db, "players", currentPlayer.id),
+                        changes,
+                        { merge: true }
+                    ).catch((e) => {
+                        console.error("Failed to save profile", e);
+                        setToast({
+                            type: "error",
+                            message: "Failed to save profile.",
+                        });
+                    })
+                }
+            />
+
+            <Toast toast={toast} onClose={() => setToast(null)} />
         </div>
     );
 }

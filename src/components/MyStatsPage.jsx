@@ -7,7 +7,9 @@ function MyStatsPage({ open, onClose, player, stats, picks }) {
 
     // Safe fallbacks so we never explode on null/undefined
     const safePlayer = player || {};
-    const safePicks = Array.isArray(picks) ? picks : [];
+    const safePicks = useMemo(() => {
+        return Array.isArray(picks) ? picks : [];
+    }, [picks]);
 
     const defaultStats = { correct: 0, incorrect: 0, total: 0, pct: 0 };
     const mergedStats =

@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import "./App.css";
 
@@ -399,140 +399,146 @@ function App() {
 
     // ==== Standings (weekly + season) ====
     // Compute season stats + list of picks for a single user
-    const getUserSeasonStats = (playerId) => {
-        if (!playerId) {
-            return {
-                stats: { correct: 0, incorrect: 0, total: 0, pct: 0 },
-                picks: [],
-            };
-        }
-
-        const gamesArray = Object.values(allGames || {});
-        const picksList = [];
-        let correct = 0;
-        let incorrect = 0;
-        let total = 0;
-
-        gamesArray.forEach((game) => {
-            const gamePicks = picks[game.id] || {};
-            const pickTeamId = gamePicks[playerId];
-            if (!pickTeamId) return; // skip games with no pick for this user
-
-            const homeScore = Number(game.home.score);
-            const awayScore = Number(game.away.score);
-
-            const hasScores =
-                !Number.isNaN(homeScore) &&
-                !Number.isNaN(awayScore) &&
-                homeScore !== awayScore;
-
-            let result = "pending";
-            let winnerTeamId = null;
-
-            if (game.completed && hasScores) {
-                winnerTeamId = homeScore > awayScore ? game.home.id : game.away.id;
-                if (pickTeamId === winnerTeamId) {
-                    result = "win";
-                    correct += 1;
-                    total += 1;
-                } else {
-                    result = "loss";
-                    incorrect += 1;
-                    total += 1;
-                }
+    const getUserSeasonStats = useCallback(
+        (playerId) => {
+            if (!playerId) {
+                return {
+                    stats: { correct: 0, incorrect: 0, total: 0, pct: 0 },
+                    picks: [],
+                };
             }
 
-            picksList.push({
-                game,
-                pickTeamId,
-                result, // 'win' | 'loss' | 'pending'
+            const gamesArray = Object.values(allGames || {});
+            const picksList = [];
+            let correct = 0;
+            let incorrect = 0;
+            let total = 0;
+
+            gamesArray.forEach((game) => {
+                const gamePicks = picks[game.id] || {};
+                const pickTeamId = gamePicks[playerId];
+                if (!pickTeamId) return; // skip games with no pick for this user
+
+                const homeScore = Number(game.home.score);
+                const awayScore = Number(game.away.score);
+
+                const hasScores =
+                    !Number.isNaN(homeScore) &&
+                    !Number.isNaN(awayScore) &&
+                    homeScore !== awayScore;
+
+                let result = "pending";
+                let winnerTeamId = null;
+
+                if (game.completed && hasScores) {
+                    winnerTeamId = homeScore > awayScore ? game.home.id : game.away.id;
+                    if (pickTeamId === winnerTeamId) {
+                        result = "win";
+                        correct += 1;
+                        total += 1;
+                    } else {
+                        result = "loss";
+                        incorrect += 1;
+                        total += 1;
+                    }
+                }
+
+                picksList.push({
+                    game,
+                    pickTeamId,
+                    result, // 'win' | 'loss' | 'pending'
+                });
             });
-        });
 
-        const pct = total > 0 ? correct / total : 0;
+            const pct = total > 0 ? correct / total : 0;
 
-        // Sort picks by week, then date
-        picksList.sort((a, b) => {
-            const wDiff = (a.game.week || 0) - (b.game.week || 0);
-            if (wDiff !== 0) return wDiff;
-            return new Date(a.game.date) - new Date(b.game.date);
-        });
+            // Sort picks by week, then date
+            picksList.sort((a, b) => {
+                const wDiff = (a.game.week || 0) - (b.game.week || 0);
+                if (wDiff !== 0) return wDiff;
+                return new Date(a.game.date) - new Date(b.game.date);
+            });
 
-        return {
-            stats: { correct, incorrect, total, pct },
-            picks: picksList,
-        };
-    };
+            return {
+                stats: { correct, incorrect, total, pct },
+                picks: picksList,
+            };
+        },
+        [allGames, picks]
+    );
 
     const myStats = useMemo(
         () => getUserSeasonStats(currentPlayer?.id),
-        [currentPlayer, allGames, picks]
+        [currentPlayer?.id, getUserSeasonStats]
     );
 
-    const computeStandings = (gamesList) => {
-        const stats = {};
-        players.forEach((p) => {
-            stats[p.id] = { correct: 0, total: 0 };
-        });
-
-        gamesList.forEach((game) => {
-            if (!game.completed) return;
-
-            const homeScore = Number(game.home.score);
-            const awayScore = Number(game.away.score);
-            if (Number.isNaN(homeScore) || Number.isNaN(awayScore)) return;
-
-            let winnerTeamId = null;
-            if (homeScore > awayScore) winnerTeamId = game.home.id;
-            else if (awayScore > homeScore) winnerTeamId = game.away.id;
-            else return; // ignore ties
-
-            const gamePicks = picks[game.id] || {};
-            players.forEach((player) => {
-                const pickTeamId = gamePicks[player.id];
-                if (!pickTeamId) return;
-                stats[player.id].total += 1;
-                if (pickTeamId === winnerTeamId) {
-                    stats[player.id].correct += 1;
-                }
+    const computeStandings = useCallback(
+        (gamesList) => {
+            const stats = {};
+            players.forEach((p) => {
+                stats[p.id] = { correct: 0, total: 0 };
             });
-        });
 
-        return players
-            .map((player) => {
-                const { correct, total } = stats[player.id] || {
-                    correct: 0,
-                    total: 0,
-                };
-                const pct = total > 0 ? correct / total : 0;
-                return {
-                    id: player.id,
-                    name: player.name,
-                    nickname: player.nickname,
-                    displayName: player.displayName,
-                    role: player.role,
-                    initials: player.initials,
-                    color: player.color,
-                    profileImageUrl: player.profileImageUrl,
-                    correct,
-                    total,
-                    pct,
-                };
-            })
-            .sort((a, b) => {
-                if (b.correct !== a.correct) return b.correct - a.correct;
-                return b.pct - a.pct;
+            gamesList.forEach((game) => {
+                if (!game.completed) return;
+
+                const homeScore = Number(game.home.score);
+                const awayScore = Number(game.away.score);
+                if (Number.isNaN(homeScore) || Number.isNaN(awayScore)) return;
+
+                let winnerTeamId = null;
+                if (homeScore > awayScore) winnerTeamId = game.home.id;
+                else if (awayScore > homeScore) winnerTeamId = game.away.id;
+                else return; // ignore ties
+
+                const gamePicks = picks[game.id] || {};
+                players.forEach((player) => {
+                    const pickTeamId = gamePicks[player.id];
+                    if (!pickTeamId) return;
+                    stats[player.id].total += 1;
+                    if (pickTeamId === winnerTeamId) {
+                        stats[player.id].correct += 1;
+                    }
+                });
             });
-    };
+
+            return players
+                .map((player) => {
+                    const { correct, total } = stats[player.id] || {
+                        correct: 0,
+                        total: 0,
+                    };
+                    const pct = total > 0 ? correct / total : 0;
+                    return {
+                        id: player.id,
+                        name: player.name,
+                        nickname: player.nickname,
+                        displayName: player.displayName,
+                        role: player.role,
+                        initials: player.initials,
+                        color: player.color,
+                        profileImageUrl: player.profileImageUrl,
+                        correct,
+                        total,
+                        pct,
+                    };
+                })
+                .sort((a, b) => {
+                    if (b.correct !== a.correct) return b.correct - a.correct;
+                    return b.pct - a.pct;
+                });
+        },
+        [players, picks]
+    );
 
     const weeklyStandings = useMemo(
         () => computeStandings(games),
-        [games, picks, players]
+        [games, computeStandings]
     );
 
     const seasonStandings = useMemo(
         () => computeStandings(Object.values(allGames)),
-        [allGames, picks, players]
+        [allGames, computeStandings]
     );
 
     // Hide games with no picks at all

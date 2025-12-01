@@ -41,6 +41,7 @@ if (process.env.NODE_ENV === "development") {
         if (!value) {
             // eslint-disable-next-line no-console
             console.warn(`Firebase config value missing for ${key}`);
+            console.log("firebaseConfig:", firebaseConfig);
         }
     });
 }

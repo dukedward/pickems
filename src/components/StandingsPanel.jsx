@@ -19,6 +19,7 @@ function StandingsPanel({ title, standings, note }) {
                                 <th>Rank</th>
                                 <th>Player</th>
                                 <th>Correct</th>
+                                <th>Incorrect</th>
                                 <th>Total</th>
                                 <th>Win %</th>
                             </tr>
@@ -29,6 +30,7 @@ function StandingsPanel({ title, standings, note }) {
                                     <td>{idx + 1}</td>
                                     <td>{s.displayName}</td>
                                     <td>{s.correct}</td>
+                                    <td>{s.incorrect}</td>
                                     <td>{s.total}</td>
                                     <td>
                                         {s.total > 0

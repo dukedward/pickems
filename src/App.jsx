@@ -474,9 +474,10 @@ function App() {
 
     const computeStandings = useCallback(
         (gamesList) => {
+            // Track correct, incorrect, and total per player
             const stats = {};
             players.forEach((p) => {
-                stats[p.id] = { correct: 0, total: 0 };
+                stats[p.id] = { correct: 0, incorrect: 0, total: 0 };
             });
 
             gamesList.forEach((game) => {
@@ -495,38 +496,37 @@ function App() {
                 players.forEach((player) => {
                     const pickTeamId = gamePicks[player.id];
                     if (!pickTeamId) return;
-                    stats[player.id].total += 1;
+
+                    const s = stats[player.id];
+                    s.total += 1;
                     if (pickTeamId === winnerTeamId) {
-                        stats[player.id].correct += 1;
+                        s.correct += 1;
+                    } else {
+                        s.incorrect += 1; // 👈 new
                     }
                 });
             });
 
-            return players
-                .map((player) => {
-                    const { correct, total } = stats[player.id] || {
-                        correct: 0,
-                        total: 0,
-                    };
-                    const pct = total > 0 ? correct / total : 0;
-                    return {
-                        id: player.id,
-                        name: player.name,
-                        nickname: player.nickname,
-                        displayName: player.displayName,
-                        role: player.role,
-                        initials: player.initials,
-                        color: player.color,
-                        profileImageUrl: player.profileImageUrl,
-                        correct,
-                        total,
-                        pct,
-                    };
-                })
-                .sort((a, b) => {
-                    if (b.correct !== a.correct) return b.correct - a.correct;
-                    return b.pct - a.pct;
-                });
+            const rows = players.map((p) => {
+                const s = stats[p.id] || { correct: 0, incorrect: 0, total: 0 };
+                const pct = s.total > 0 ? s.correct / s.total : 0;
+                return {
+                    id: p.id,
+                    displayName: p.displayName || p.name || "Player",
+                    correct: s.correct,
+                    incorrect: s.incorrect, // 👈 new in row
+                    total: s.total,
+                    pct,
+                };
+            });
+
+            rows.sort((a, b) => {
+                if (b.pct !== a.pct) return b.pct - a.pct;
+                if (b.correct !== a.correct) return b.correct - a.correct;
+                return a.displayName.localeCompare(b.displayName);
+            });
+
+            return rows;
         },
         [players, picks]
     );

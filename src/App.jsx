@@ -967,7 +967,11 @@ function App() {
                         note="Based on all games loaded so far; ties ignored."
                     />
 
-                    <WinPctChart title="Season Win%" standings={seasonStandings} />
+                    <WinPctChart
+                        title="Season Win%"
+                        standings={seasonStandings}
+                        players={players}
+                    />
                 </aside>
             </div>
 
@@ -975,6 +979,7 @@ function App() {
                 open={winnerModalOpen}
                 onClose={() => setWinnerModalOpen(false)}
                 standing={topWeekly}
+                players={players}
             />
 
             <MyStatsPage
